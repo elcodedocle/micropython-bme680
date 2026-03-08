@@ -5,12 +5,12 @@ import time
 
 import board
 
-import adafruit_bme680
+import bme680
 
 # Create sensor object, communicating over the board's default I2C bus
 i2c = board.I2C()  # uses board.SCL and board.SDA
 # i2c = board.STEMMA_I2C()  # For using the built-in STEMMA QT connector on a microcontroller
-bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c, debug=False)
+bme680 = bme680.BME680I2C(i2c, debug=False)
 
 # change this to match the location's pressure (hPa) at sea level
 bme680.sea_level_pressure = 1013.25
