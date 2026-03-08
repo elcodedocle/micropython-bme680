@@ -4,17 +4,19 @@
 
 
 """
-`adafruit_bme680`
+`micropython_bme680`
 ================================================================================
 
-CircuitPython library for BME680 temperature, pressure and humidity sensor.
+Micropython library for BME680 temperature, pressure and humidity sensor.
 
 
-* Author(s): Limor Fried, William Garber, many others
+* Author(s): Limor Fried, William Garber, elcodedocle, many others
 
 
 Implementation Notes
 --------------------
+
+Adapted from https://github.com/adafruit/Adafruit_CircuitPython_BME680.git
 
 **Hardware:**
 
@@ -22,9 +24,7 @@ Implementation Notes
 
 **Software and Dependencies:**
 
-* Adafruit CircuitPython firmware for the supported boards:
-  https://github.com/adafruit/circuitpython/releases
-* Adafruit's Bus Device library: https://github.com/adafruit/Adafruit_CircuitPython_BusDevice
+* Micropython firmware for the supported boards
 """
 
 import math
@@ -41,18 +41,10 @@ def delay_microseconds(nusec):
 
 try:
     # Used only for type annotations.
-
     import typing
-
-    from busio import I2C, SPI
-    from circuitpython_typing import ReadableBuffer
-    from digitalio import DigitalInOut
-
+    from machine import I2C
 except ImportError:
     pass
-
-__version__ = "0.0.0+auto.0"
-__repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_BME680.git"
 
 
 #    I2C ADDRESS/BITS/SETTINGS NEW
@@ -160,7 +152,7 @@ def bme_set_bits_pos_0(reg_data, bitname_msk, data):
     return (reg_data & ~bitname_msk) | (data & bitname_msk)
 
 
-def _read24(arr: ReadableBuffer) -> float:
+def _read24(arr: bytearray) -> float:
     """Parse an unsigned 24-bit value as a floating point and return it."""
     ret = 0.0
     # print([hex(i) for i in arr])
@@ -170,7 +162,7 @@ def _read24(arr: ReadableBuffer) -> float:
     return ret
 
 
-class Adafruit_BME680:
+class BME680:
     """Driver from BME680 air quality sensor
 
     :param int refresh_rate: Maximum number of readings per second. Faster property reads
@@ -179,7 +171,7 @@ class Adafruit_BME680:
     def __init__(self, *, refresh_rate: int = 10) -> None:
         """Check the BME680 was found, read the coefficients and enable the sensor for continuous
         reads."""
-        self._write(_BME680_REG_SOFTRESET, [0xB6])
+        self._write(_BME680_REG_SOFTRESET, bytearray([0xB6]))
         time.sleep(0.005)
 
         # Check device ID.
@@ -193,8 +185,8 @@ class Adafruit_BME680:
         self._read_calibration()
 
         # set up heater
-        self._write(_BME680_BME680_RES_HEAT_0, [0x73])
-        self._write(_BME680_BME680_GAS_WAIT_0, [0x65])
+        self._write(_BME680_BME680_RES_HEAT_0, bytearray([0x73]))
+        self._write(_BME680_BME680_GAS_WAIT_0, bytearray([0x65]))
 
         self.sea_level_pressure = 1013.25
         """Pressure in hectoPascals at sea level. Used to calibrate :attr:`altitude`."""
@@ -364,35 +356,36 @@ class Adafruit_BME680:
     def _perform_reading(self) -> None:
         """Perform a single-shot reading from the sensor and fill internal data structure for
         calculations"""
-        if time.monotonic() - self._last_reading < self._min_refresh_time:
+        if time.ticks_ms() - self._last_reading < self._min_refresh_time * 1000:
             return
 
         # set filter
-        self._write(_BME680_REG_CONFIG, [self._filter << 2])
+        self._write(_BME680_REG_CONFIG, bytearray([self._filter << 2]))
         # turn on temp oversample & pressure oversample
         self._write(
             _BME680_REG_CTRL_MEAS,
-            [(self._temp_oversample << 5) | (self._pressure_oversample << 2)],
+            bytearray([(self._temp_oversample << 5) | (self._pressure_oversample << 2)]),
         )
         # turn on humidity oversample
-        self._write(_BME680_REG_CTRL_HUM, [self._humidity_oversample])
+        self._write(_BME680_REG_CTRL_HUM, bytearray([self._humidity_oversample]))
         # gas measurements enabled
         if self._chip_variant == 0x01:
-            self._write(_BME680_REG_CTRL_GAS, [(self._run_gas & _BME680_RUNGAS) << 1])
+            self._write(_BME680_REG_CTRL_GAS, bytearray([(self._run_gas & _BME680_RUNGAS) << 1]))
         else:
-            self._write(_BME680_REG_CTRL_GAS, [(self._run_gas & _BME680_RUNGAS)])
+            self._write(_BME680_REG_CTRL_GAS, bytearray([(self._run_gas & _BME680_RUNGAS)]))
         ctrl = self._read_byte(_BME680_REG_CTRL_MEAS)
         ctrl = (ctrl & 0xFC) | 0x01  # enable single shot!
-        self._write(_BME680_REG_CTRL_MEAS, [ctrl])
+        self._write(_BME680_REG_CTRL_MEAS, bytearray([ctrl]))
         new_data = False
-        start_time = time.monotonic()
+        start_time = time.ticks_ms()
+        data = []
         while not new_data:
             data = self._read(_BME680_REG_MEAS_STATUS, 17)
             new_data = data[0] & 0x80 != 0
             time.sleep(0.005)
-            if time.monotonic() - start_time >= 3.0:
+            if time.ticks_ms() - start_time >= 3000.0:
                 raise RuntimeError("Timeout while reading sensor data")
-        self._last_reading = time.monotonic()
+        self._last_reading = time.ticks_ms()
 
         self._adc_pres = _read24(data[2:5]) / 16
         self._adc_temp = _read24(data[5:8]) / 16
@@ -462,10 +455,6 @@ class Adafruit_BME680:
         # restrict to BME68X_FORCED_MODE
         op_mode: int = _BME68X_FORCED_MODE
         nb_conv: int = 0
-        hctrl: int = _BME68X_ENABLE_HEATER
-        run_gas: int = 0
-        ctrl_gas_data_0: int = 0
-        ctrl_gas_data_1: int = 0
 
         self._set_op_mode(_BME68X_SLEEP_MODE)
         self._set_conf(heater_temp, heater_time, op_mode)
@@ -487,8 +476,8 @@ class Adafruit_BME680:
         ctrl_gas_data_1 = bme_set_bits(
             ctrl_gas_data_1, _BME68X_RUN_GAS_MSK, _BME68X_RUN_GAS_POS, run_gas
         )
-        self._write(_BME68X_REG_CTRL_GAS_0, [ctrl_gas_data_0])
-        self._write(_BME68X_REG_CTRL_GAS_1, [ctrl_gas_data_1])
+        self._write(_BME68X_REG_CTRL_GAS_0, bytearray([ctrl_gas_data_0]))
+        self._write(_BME68X_REG_CTRL_GAS_1, bytearray([ctrl_gas_data_1]))
 
     def _set_op_mode(self, op_mode: int) -> None:
         """
@@ -505,13 +494,13 @@ class Adafruit_BME680:
             pow_mode = tmp_pow_mode & _BME68X_MODE_MSK
             if pow_mode != _BME68X_SLEEP_MODE:
                 tmp_pow_mode &= ~_BME68X_MODE_MSK  # Set to sleep
-                self._write(_BME680_REG_CTRL_MEAS, [tmp_pow_mode])
+                self._write(_BME680_REG_CTRL_MEAS, bytearray([tmp_pow_mode]))
                 # dev->delay_us(_BME68X_PERIOD_POLL, dev->intf_ptr)  # HELP
                 delay_microseconds(_BME68X_PERIOD_POLL)
         # Already in sleep
         if op_mode != _BME68X_SLEEP_MODE:
             tmp_pow_mode = (tmp_pow_mode & ~_BME68X_MODE_MSK) | (op_mode & _BME68X_MODE_MSK)
-            self._write(_BME680_REG_CTRL_MEAS, [tmp_pow_mode])
+            self._write(_BME680_REG_CTRL_MEAS, bytearray([tmp_pow_mode]))
 
     def _set_conf(self, heater_temp: int, heater_time: int, op_mode: int) -> None:
         """
@@ -522,31 +511,8 @@ class Adafruit_BME680:
             raise OSError("GasHeaterException: _set_conf not forced mode")
         rh_reg_data: int = self._calc_res_heat(heater_temp)
         gw_reg_data: int = self._calc_gas_wait(heater_time)
-        self._write(_BME680_BME680_RES_HEAT_0, [rh_reg_data])
-        self._write(_BME680_BME680_GAS_WAIT_0, [gw_reg_data])
-
-    def _calc_res_heat(self, temp: int) -> int:
-        """
-        This internal API is used to calculate the heater resistance value using float
-        """
-        gh1: int = self._gas_calibration[0]
-        gh2: int = self._gas_calibration[1]
-        gh3: int = self._gas_calibration[2]
-        htr: int = self._heat_range
-        htv: int = self._heat_val
-        amb: int = self._amb_temp
-
-        temp = min(temp, 400)  # Cap temperature
-
-        var1: int = ((int(amb) * gh3) / 1000) * 256
-        var2: int = (gh1 + 784) * (((((gh2 + 154009) * temp * 5) / 100) + 3276800) / 10)
-        var3: int = var1 + (var2 / 2)
-        var4: int = var3 / (htr + 4)
-        var5: int = (131 * htv) + 65536
-        heatr_res_x100: int = int(((var4 / var5) - 250) * 34)
-        heatr_res: int = int((heatr_res_x100 + 50) / 100)
-
-        return heatr_res
+        self._write(_BME680_BME680_RES_HEAT_0, bytearray(bytes.fromhex('0'+hex(rh_reg_data)[2:] if len(hex(rh_reg_data))%2 else hex(rh_reg_data)[2:])))
+        self._write(_BME680_BME680_GAS_WAIT_0, bytearray(bytes.fromhex('0'+hex(gw_reg_data)[2:] if len(hex(gw_reg_data))%2 else hex(gw_reg_data)[2:])))
 
     def _calc_res_heat(self, temp: int) -> int:
         """
@@ -561,15 +527,16 @@ class Adafruit_BME680:
 
         temp = min(temp, 400)  # Cap temperature
 
-        var1: float = (gh1 / (16.0)) + 49.0
-        var2: float = ((gh2 / (32768.0)) * (0.0005)) + 0.00235
-        var3: float = gh3 / (1024.0)
+        var1: float = (gh1 / 16.0) + 49.0
+        var2: float = ((gh2 / 32768.0) * 0.0005) + 0.00235
+        var3: float = gh3 / 1024.0
         var4: float = var1 * (1.0 + (var2 * float(temp)))
         var5: float = var4 + (var3 * amb)
         res_heat: int = int(3.4 * ((var5 * (4 / (4 + htr)) * (1 / (1 + (htv * 0.002)))) - 25))
         return res_heat
 
-    def _calc_gas_wait(self, dur: int) -> int:
+    @staticmethod
+    def _calc_gas_wait(dur: int) -> int:
         """
         This internal API is used to calculate the gas wait
         """
@@ -585,7 +552,7 @@ class Adafruit_BME680:
         return durval
 
 
-class Adafruit_BME680_I2C(Adafruit_BME680):
+class BME680I2C(BME680):
     """Driver for I2C connected BME680.
 
     :param ~busio.I2C i2c: The I2C bus the BME680 is connected to.
@@ -638,135 +605,26 @@ class Adafruit_BME680_I2C(Adafruit_BME680):
         *,
         refresh_rate: int = 10,
     ) -> None:
-        """Initialize the I2C device at the 'address' given"""
-        from adafruit_bus_device import (
-            i2c_device,
-        )
-
-        self._i2c = i2c_device.I2CDevice(i2c, address)
+        self._i2c = i2c
+        self._address = address
         self._debug = debug
         super().__init__(refresh_rate=refresh_rate)
 
     def _read(self, register: int, length: int) -> bytearray:
         """Returns an array of 'length' bytes from the 'register'"""
-        with self._i2c as i2c:
-            i2c.write(bytes([register & 0xFF]))
-            result = bytearray(length)
-            i2c.readinto(result)
-            if self._debug:
-                print(f"\t${register:02X} => {[hex(i) for i in result]}")
-            return result
+        self._i2c.writeto(self._address, bytes([register & 0xFF]))
+        result = bytearray(length)
+        self._i2c.readfrom_into(self._address,result)
+        if self._debug:
+            print(f"\t${register:02X} => {[hex(i) for i in result]}")
+        return result
 
-    def _write(self, register: int, values: ReadableBuffer) -> None:
+    def _write(self, register: int, values: bytearray) -> None:
         """Writes an array of 'length' bytes to the 'register'"""
-        with self._i2c as i2c:
-            buffer = bytearray(2 * len(values))
-            for i, value in enumerate(values):
-                buffer[2 * i] = register + i
-                buffer[2 * i + 1] = value
-            i2c.write(buffer)
-            if self._debug:
-                print(f"\t${values[0]:02X} <= {[hex(i) for i in values[1:]]}")
-
-
-class Adafruit_BME680_SPI(Adafruit_BME680):
-    """Driver for SPI connected BME680.
-
-    :param ~busio.SPI spi: SPI device
-    :param ~digitalio.DigitalInOut cs: Chip Select
-    :param bool debug: Print debug statements when `True`. Defaults to `False`
-    :param int baudrate: Clock rate, default is :const:`100000`
-    :param int refresh_rate: Maximum number of readings per second. Faster property reads
-      will be from the previous reading.
-
-
-    **Quickstart: Importing and using the BME680**
-
-        Here is an example of using the :class:`BMP680_SPI` class.
-        First you will need to import the libraries to use the sensor
-
-        .. code-block:: python
-
-            import board
-            from digitalio import DigitalInOut, Direction
-            import adafruit_bme680
-
-        Once this is done you can define your ``board.SPI`` object and define your sensor object
-
-        .. code-block:: python
-
-            cs = digitalio.DigitalInOut(board.D10)
-            spi = board.SPI()
-            bme680 = adafruit_bme680.Adafruit_BME680_SPI(spi, cs)
-
-        You need to setup the pressure at sea level
-
-        .. code-block:: python
-
-            bme680.sea_level_pressure = 1013.25
-
-        Now you have access to the :attr:`temperature`, :attr:`gas`, :attr:`relative_humidity`,
-        :attr:`pressure` and :attr:`altitude` attributes
-
-        .. code-block:: python
-
-            temperature = bme680.temperature
-            gas = bme680.gas
-            relative_humidity = bme680.relative_humidity
-            pressure = bme680.pressure
-            altitude = bme680.altitude
-
-    """
-
-    def __init__(  # noqa: PLR0913 Too many arguments in function definition
-        self,
-        spi: SPI,
-        cs: DigitalInOut,
-        baudrate: int = 100000,
-        debug: bool = False,
-        *,
-        refresh_rate: int = 10,
-    ) -> None:
-        from adafruit_bus_device import (
-            spi_device,
-        )
-
-        self._spi = spi_device.SPIDevice(spi, cs, baudrate=baudrate)
-        self._debug = debug
-        super().__init__(refresh_rate=refresh_rate)
-
-    def _read(self, register: int, length: int) -> bytearray:
-        if register != _BME680_REG_STATUS:
-            # _BME680_REG_STATUS exists in both SPI memory pages
-            # For all other registers, we must set the correct memory page
-            self._set_spi_mem_page(register)
-
-        register = (register | 0x80) & 0xFF  # Read single, bit 7 high.
-        with self._spi as spi:
-            spi.write(bytearray([register]))
-            result = bytearray(length)
-            spi.readinto(result)
-            if self._debug:
-                print(f"\t${register:02X} => {[hex(i) for i in result]}")
-            return result
-
-    def _write(self, register: int, values: ReadableBuffer) -> None:
-        if register != _BME680_REG_STATUS:
-            # _BME680_REG_STATUS exists in both SPI memory pages
-            # For all other registers, we must set the correct memory page
-            self._set_spi_mem_page(register)
-        register &= 0x7F  # Write, bit 7 low.
-        with self._spi as spi:
-            buffer = bytearray(2 * len(values))
-            for i, value in enumerate(values):
-                buffer[2 * i] = register + i
-                buffer[2 * i + 1] = value & 0xFF
-            spi.write(buffer)
-            if self._debug:
-                print(f"\t${values[0]:02X} <= {[hex(i) for i in values[1:]]}")
-
-    def _set_spi_mem_page(self, register: int) -> None:
-        spi_mem_page = 0x00
-        if register < 0x80:
-            spi_mem_page = 0x10
-        self._write(_BME680_REG_STATUS, [spi_mem_page])
+        buffer = bytearray(2 * len(values))
+        for i, value in enumerate(values):
+            buffer[2 * i] = register + i
+            buffer[2 * i + 1] = value
+        self._i2c.writeto(self._address, buffer)
+        if self._debug:
+            print(f"\t${values[0]:02X} <= {[hex(i) for i in values[1:]]}")
