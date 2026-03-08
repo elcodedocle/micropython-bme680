@@ -1,10 +1,10 @@
-# SPDX-FileCopyrightText: 2017 ladyada for Adafruit Industries
+# SPDX-FileCopyrightText: 2017 ladyada for Adafruit Industries; 2026 elcodedocle
 #
 # SPDX-License-Identifier: MIT AND BSD-3-Clause
 
 
 """
-`micropython_bme680`
+`bme680`
 ================================================================================
 
 Micropython library for BME680 temperature, pressure and humidity sensor.
@@ -17,10 +17,11 @@ Implementation Notes
 --------------------
 
 Adapted from https://github.com/adafruit/Adafruit_CircuitPython_BME680.git
+and https://github.com/boschsensortec/BME68x_SensorAPI/blob/master/bme68x.c
 
 **Hardware:**
 
-* `Adafruit BME680 Temp, Humidity, Pressure and Gas Sensor <https://www.adafruit.com/product/3660>`_
+* `BME680 Temp, Humidity, Pressure and Gas Sensor (E.g. <https://www.adafruit.com/product/3660>)`_
 
 **Software and Dependencies:**
 
@@ -278,7 +279,7 @@ class BME680:
         var2 = var2 + (var1 * self._pressure_calibration[4] * 2)
         var2 = (var2 / 4) + (self._pressure_calibration[3] * 65536)
         var1 = ((((var1 / 4) * (var1 / 4)) / 8192) * (self._pressure_calibration[2] * 32) / 8) + (
-            (self._pressure_calibration[1] * var1) / 2
+                (self._pressure_calibration[1] * var1) / 2
         )
         var1 = var1 / 262144
         var1 = ((32768 + var1) * self._pressure_calibration[0]) / 32768
@@ -302,19 +303,19 @@ class BME680:
         self._perform_reading()
         temp_scaled = ((self._t_fine * 5) + 128) / 256
         var1 = (self._adc_hum - (self._humidity_calibration[0] * 16)) - (
-            (temp_scaled * self._humidity_calibration[2]) / 200
+                (temp_scaled * self._humidity_calibration[2]) / 200
         )
         var2 = (
-            self._humidity_calibration[1]
-            * (
-                ((temp_scaled * self._humidity_calibration[3]) / 100)
-                + (
-                    ((temp_scaled * ((temp_scaled * self._humidity_calibration[4]) / 100)) / 64)
-                    / 100
-                )
-                + 16384
-            )
-        ) / 1024
+                       self._humidity_calibration[1]
+                       * (
+                               ((temp_scaled * self._humidity_calibration[3]) / 100)
+                               + (
+                                       ((temp_scaled * ((temp_scaled * self._humidity_calibration[4]) / 100)) / 64)
+                                       / 100
+                               )
+                               + 16384
+                       )
+               ) / 1024
         var3 = var1 * var2
         var4 = self._humidity_calibration[5] * 128
         var4 = (var4 + ((temp_scaled * self._humidity_calibration[6]) / 100)) / 16
@@ -555,7 +556,7 @@ class BME680:
 class BME680I2C(BME680):
     """Driver for I2C connected BME680.
 
-    :param ~busio.I2C i2c: The I2C bus the BME680 is connected to.
+    :param ~machine.I2C i2c: The I2C bus the BME680 is connected to.
     :param int address: I2C device address. Defaults to :const:`0x77`
     :param bool debug: Print debug statements when `True`. Defaults to `False`
     :param int refresh_rate: Maximum number of readings per second. Faster property reads
@@ -563,47 +564,47 @@ class BME680I2C(BME680):
 
     **Quickstart: Importing and using the BME680**
 
-        Here is an example of using the :class:`BMP680_I2C` class.
+        Here is an example of using the :class:`BMP680I2C` class.
         First you will need to import the libraries to use the sensor
 
         .. code-block:: python
 
-            import board
-            import adafruit_bme680
+            import machine
+            import bme680
 
-        Once this is done you can define your ``board.I2C`` object and define your sensor object
+        Once this is done you can define your ``machine.I2C`` object and define your sensor object
 
         .. code-block:: python
 
-            i2c = board.I2C()   # uses board.SCL and board.SDA
-            bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c)
+            i2c = machine.I2C(0, scl=machine.Pin(12), sda=machine.Pin(13), freq=400000)
+            sensor = bme680.BME680I2C(i2c)
 
         You need to setup the pressure at sea level
 
         .. code-block:: python
 
-            bme680.sea_level_pressure = 1013.25
+            sensor.sea_level_pressure = 1013.25
 
         Now you have access to the :attr:`temperature`, :attr:`gas`, :attr:`relative_humidity`,
         :attr:`pressure` and :attr:`altitude` attributes
 
         .. code-block:: python
 
-            temperature = bme680.temperature
-            gas = bme680.gas
-            relative_humidity = bme680.relative_humidity
-            pressure = bme680.pressure
-            altitude = bme680.altitude
+            temperature = sensor.temperature
+            gas = sensor.gas
+            relative_humidity = sensor.relative_humidity
+            pressure = sensor.pressure
+            altitude = sensor.altitude
 
     """
 
     def __init__(
-        self,
-        i2c: I2C,
-        address: int = 0x77,
-        debug: bool = False,
-        *,
-        refresh_rate: int = 10,
+            self,
+            i2c: I2C,
+            address: int = 0x77,
+            debug: bool = False,
+            *,
+            refresh_rate: int = 10,
     ) -> None:
         self._i2c = i2c
         self._address = address
